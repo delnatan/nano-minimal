@@ -9,34 +9,50 @@
 ;; Author: Nicolas P. Rougier <nicolas.rougier@inria.fr>
 ;; URL: https://github.com/rougier/nano-emacs
 
-;; This is NANO Emacs in 256 lines, without any dependency 
-;; Usage (command line):  emacs -Q -l nano.el -[light|dark]
-
 ;; --- Speed benchmarking -----------------------------------------------------
 (setq init-start-time (current-time))
 
 ;; --- Typography stack -------------------------------------------------------
-(defvar nano-font-family "Iosevka")
-(defvar nano-font-size    140)
+(defcustom nano-font-family "Berkeley Mono"
+  "The default font family for NANO."
+  :type 'string)
 
-(defun nano-font-weight ()
-  "Return 'light on HiDPI displays (>160 DPI), 'regular otherwise."
-  (let* ((attrs (car (display-monitor-attributes-list)))
-         (geo   (alist-get 'geometry attrs))
-         (mm    (alist-get 'mm-size  attrs))
-         (dpi   (when (and geo mm (> (car mm) 0))
-                  (/ (* 25.4 (nth 2 geo)) (car mm)))))
-    (if (and dpi (> dpi 160)) 'light 'regular)))
+(defcustom nano-font-size 130
+  "The default font size for NANO."
+  :type 'integer)
 
-(let ((w (nano-font-weight)))
-  (set-face-attribute 'default        nil :height nano-font-size :weight w
-                      :family nano-font-family)
-  (set-face-attribute 'fixed-pitch    nil :family nano-font-family :height 1.0)
-  (set-face-attribute 'variable-pitch nil :family nano-font-family :height 1.0)
-  (set-face-attribute 'bold           nil :weight (if (eq w 'light) 'regular 'medium))
-  (set-face-attribute 'italic         nil :slant 'italic)
-  (set-face-attribute 'bold-italic    nil :weight (if (eq w 'light) 'regular 'medium)
-                      :slant 'italic))
+(defcustom nano-font-weight 'light
+  "The default font weight for NANO ('light or 'regular)."
+  :type 'symbol)
+
+(defun nano-strong-weight (&optional weight)
+  "Return the weight that is \"one step up\" from WEIGHT (or `nano-font-weight').
+
+This keeps `nano-strong' visually distinct from the default face at
+both `light' and `regular' base weights, on high and low DPI monitors."
+  (if (eq (or weight nano-font-weight) 'light) 'regular 'medium))
+
+(defun nano-setup-fonts ()
+  (let ((w nano-font-weight))
+    (set-face-attribute 'default        nil :height nano-font-size :weight w
+                        :family nano-font-family)
+    (set-face-attribute 'fixed-pitch    nil :family nano-font-family :height 1.0 :weight w)
+    (set-face-attribute 'variable-pitch nil :family nano-font-family :height 1.0 :weight w)
+    (set-face-attribute 'bold           nil :weight (nano-strong-weight w))
+    (set-face-attribute 'italic         nil :slant 'italic)
+    (set-face-attribute 'bold-italic    nil :weight (nano-strong-weight w)
+                        :slant 'italic)
+    ;; `set-face-attribute' alone updates the face's recorded attributes but
+    ;; does not force the frame to re-select its underlying font, so the
+    ;; requested weight silently never reaches the glyphs actually drawn.
+    ;; `set-frame-font' forces that re-selection (and, with FRAMES non-nil,
+    ;; applies to existing and future frames).
+    (when (display-graphic-p)
+      (set-frame-font (font-spec :family nano-font-family
+                                  :size (/ nano-font-size 10.0)
+                                  :weight w)
+                      nil t))))
+
 (setq-default line-spacing 0.10)
 
 (set-display-table-slot standard-display-table 'truncation (make-glyph-code ?…))
@@ -76,7 +92,7 @@
   (apply #'set-face-attribute `(,(intern (concat (symbol-name name) "-i")) nil
                                 :foreground ,(face-background 'nano-default)
                                 ,@(when foreground `(:background ,foreground))
-                                :weight regular)))
+                                :weight ,(or weight nano-font-weight))))
 
 (defun nano-link-face (sources faces &optional attributes)
   "Make FACES to inherit from SOURCES faces and unspecify ATTRIBUTES."
@@ -130,6 +146,7 @@
                   ((nano-faded-i nano-strong) . (show-paren-match))))
     (nano-link-face (car item) (cdr item)))
 
+  (nano-setup-fonts)
   ;; Mode & header lines 
   (set-face-attribute 'header-line nil
                       :background 'unspecified
@@ -144,14 +161,15 @@
   (set-face-attribute 'mode-line-inactive nil
                       :background (face-background 'default)
                       :underline (face-foreground 'nano-faded)
-                      :height 40 :overline nil :box nil))
+                      :height 40 :overline nil :box nil)
+  (nano-setup-fonts))
 
 (defun nano-light (&rest args)
   "NANO light theme (based on material colors)"
 
   (interactive)
   (nano-set-face 'nano-default "#37474F" "#FFFFFF") ;; Blue Grey / L800
-  (nano-set-face 'nano-strong "#000000" nil 'regular) ;; Black
+  (nano-set-face 'nano-strong "#000000" nil (nano-strong-weight)) ;; Black
   (nano-set-face 'nano-highlight nil "#FAFAFA") ;; Very Light Grey
   (nano-set-face 'nano-subtle nil "#ECEFF1") ;; Blue Grey / L50
   (nano-set-face 'nano-faded "#90A4AE") ;; Blue Grey / L300
@@ -165,7 +183,7 @@
 
   (interactive)
   (nano-set-face 'nano-default "#ECEFF4" "#2E3440") ;; Snow Storm 3 
-  (nano-set-face 'nano-strong "#ECEFF4" nil 'regular) ;; Polar Night 0
+  (nano-set-face 'nano-strong "#ECEFF4" nil (nano-strong-weight)) ;; Polar Night 0
   (nano-set-face 'nano-highlight nil "#3B4252")  ;; Polar Night 1
   (nano-set-face 'nano-subtle nil "#434C5E") ;; Polar Night 2 
   (nano-set-face 'nano-faded "#677691") ;; 
@@ -177,7 +195,15 @@
 ;; --- Command line theme chooser ---------------------------------------------
 (add-to-list 'command-switch-alist '("-dark"  . nano-dark))
 (add-to-list 'command-switch-alist '("-light" . nano-light))
-(if (member "-dark" command-line-args) (nano-dark) (nano-light))
+(add-to-list 'command-switch-alist '("-dark"  . nano-dark))
+(add-to-list 'command-switch-alist '("-light" . nano-light))
+
+;; FIX: Wait for window-setup-hook before applying the theme
+(add-hook 'window-setup-hook
+          (lambda ()
+            (if (member "-dark" command-line-args) 
+                (nano-dark) 
+              (nano-light))))
 
 
 ;; --- Minimal key bindings ---------------------------------------------------
